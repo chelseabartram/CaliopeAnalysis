@@ -1,0 +1,149 @@
+#include <stdlib.h>
+#include <getopt.h>
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <sys/wait.h>
+#include <sys/time.h>
+#include <sys/resource.h> 
+#include <set> 
+
+#include "ORDataProcManager.hh"
+#include "ORFileReader.hh"
+#include "ORFileWriter.hh"
+#include "ORLogger.hh"
+#include "ORSocketReader.hh"
+
+#include "OROrcaRequestProcessor.hh"
+#include "ORServer.hh"
+#include "ORHandlerThread.hh"
+#include "ORMCA927TreeWriter.hh"
+#include "CaliopeAnalysisElement.hh"
+#include "ORSIS3302Decoder.hh"
+
+using namespace std;
+
+static const char Usage[] =
+"\n"
+"\n"
+"Usage: caliopeanalysis [options] [input file(s) / socket host:port]\n"
+"\n"
+"The one required argument is either the name of a file to be processed or\n"
+"a host and port of a socket from which to read data. For a file, you may\n"
+"enter a series of files to be processed, or use a wildcard like \"file*.dat\"\n"
+"For a socket, the argument should be formatted as host:port.\n"
+"\n"
+"Available options:\n"
+"  --help : print this message and exit\n"
+"  --verbosity [verbosity] : set the severity/verbosity for the logger.\n"
+"    Choices are: debug, trace, routine, warning, error, and fatal.\n"
+"  --label [label] : use [label] as prefix for root output file name.\n"
+"  --keepalive [time] : keep a socket connection alive if lost.\n"
+"    Wait [time] (default 10) seconds between connection attempts.\n"
+"  --maxreconnect [num] : Maximum [num] socket reconnect attempts.\n"
+"    A [num] value of 0 sets this to infinity (i.e. no timeout).\n"
+"  --daemon [port] : Runs as a server accepting connections on [port]. \n" 
+"  --connections [num] : Maximum [num] connections accepted by server. \n" 
+"\n"
+"Example usage:\n"
+"caliopeanalysis run194ecpu\n"
+"  Rootify local file run194ecpu with default verbosity, output file label, etc.\n"
+"caliopeanalysis run*\n"
+"  Same as before, but run over all files beginning with \"run\".\n"
+"caliopeanalysis --verbosity debug --label mylabel run194ecpu\n"
+"  The same, but with example usage of the verbosity and mylabel options.\n"
+"  An output file will be created with name mylabel_run194.root, and lots\n"
+"  of debugging output will appear.\n"
+"\n"
+"\n";
+
+
+int main(int argc, char** argv)
+{
+  if(argc == 1) {
+    ORLog(kError) << "You must supply some options" << endl << Usage;
+    return 1;
+  }
+  static struct option longOptions[] = {
+    {"help", no_argument, 0, 'h'},
+    {"verbosity", required_argument, 0, 'v'},
+    {"label", required_argument, 0, 'l'},
+    {"keepalive", optional_argument, 0, 'k'},
+    {"maxreconnect", required_argument, 0, 'm'},
+    {"daemon", required_argument, 0, 'd'},
+    {"connections", required_argument, 0, 'c'}
+  };
+
+  string label = "OR";
+  ORVReader* reader = new ORFileReader;
+
+
+  while(1) {
+    char optId = getopt_long(argc, argv, "", longOptions, NULL);
+    if(optId == -1) break;
+    switch(optId) {
+      case('h'): // help
+        cout << Usage;
+        return 0;
+      case('v'): // verbosity
+        if(strcmp(optarg, "debug") == 0) ORLogger::SetSeverity(ORLogger::kDebug);
+        else if(strcmp(optarg, "trace") == 0) ORLogger::SetSeverity(ORLogger::kTrace);
+        else if(strcmp(optarg, "routine") == 0) ORLogger::SetSeverity(ORLogger::kRoutine);
+        else if(strcmp(optarg, "warning") == 0) ORLogger::SetSeverity(ORLogger::kWarning);
+        else if(strcmp(optarg, "error") == 0) ORLogger::SetSeverity(ORLogger::kError);
+        else if(strcmp(optarg, "fatal") == 0) ORLogger::SetSeverity(ORLogger::kFatal);
+        else {
+          ORLog(kWarning) << "Unknown verbosity setting " << optarg 
+                          << "; using kRoutine" << endl;
+          ORLogger::SetSeverity(ORLogger::kRoutine);
+        }
+        break;
+      case('l'): // label
+        label = optarg;
+        break;
+      default: // unrecognized option
+        ORLog(kError) << Usage;
+        return 1;
+    }
+  }
+
+  if (argc <= optind ) {
+    ORLog(kError) << "You must supply a filename " << endl
+                  << Usage << endl;
+    return 1;
+  }
+
+  ORHandlerThread* handlerThread = new ORHandlerThread();
+  handlerThread->StartThread();
+
+  /* Normal running, either connecting to a server or reading in a file. */
+  string readerArg = argv[optind];
+  for (int i=optind; i<argc; i++) {
+    ((ORFileReader*) reader)->AddFileToProcess(argv[i]);
+  }
+
+  if (!reader->OKToRead()) {
+    ORLog(kError) << "Reader couldn't read" << endl;
+    return 1;
+  }
+
+  ORLog(kRoutine) << "Setting up data processing manager..." << endl;
+  ORDataProcManager dataProcManager(reader);
+
+  /* Declare processors here. */
+
+  CaliopeAnalysisElement element;
+  // ORMyProcessor processor;
+  dataProcManager.AddProcessor(&element);
+  
+
+  ORLog(kRoutine) << "Start processing..." << endl;
+  dataProcManager.ProcessDataStream();
+  ORLog(kRoutine) << "Finished processing..." << endl;
+
+  delete reader;
+  delete handlerThread;
+
+  return 0;
+}
+

@@ -1,0 +1,82 @@
+// CaliopeAnalysisElement.cc
+
+#include "CaliopeAnalysisElement.hh"
+
+#include "ORLogger.hh"
+#include "ORVDataDecoder.hh"
+
+#include <iostream>
+
+using namespace std;
+
+CaliopeAnalysisElement::CaliopeAnalysisElement() : ORDataProcessor( new ORSIS3302Decoder )
+{
+  fDecoder  = dynamic_cast<ORSIS3302Decoder*>(fDataDecoder);
+}
+
+CaliopeAnalysisElement::~CaliopeAnalysisElement()
+{
+}
+
+ORDataProcessor::EReturnCode CaliopeAnalysisElement::StartRun(){
+  fFile.open ("waveforms.csv");
+  return ORDataProcessor::kSuccess;
+}
+
+ORDataProcessor::EReturnCode CaliopeAnalysisElement::ProcessMyDataRecord(UInt_t* record)
+{
+  fDecoder->SetDataRecord(record);
+  //This gigantic list of declares are for each of the fields in the decoder
+  bool isBufferWrapEnabled = fDecoder->IsBufferWrapEnabled() ;
+  unsigned long nWrapSampless = fDecoder->GetNofWrapSamples();
+  unsigned iWrapStart = fDecoder->GetWrapStartIndex();
+  size_t trailerLen = fDecoder->GetTrailerLen();
+  unsigned short boardID = fDecoder->GetBoardId();
+  unsigned short channelNum = fDecoder->GetChannelNum();
+  unsigned short timeStampLo = fDecoder->GetTimeStampLo();
+  unsigned short timeStampMed = fDecoder->GetTimeStampMed();
+  unsigned short timeStampHi = fDecoder->GetTimeStampHi();
+  unsigned long timeStamp = fDecoder->GetTimeStamp();
+
+  unsigned maxE = fDecoder->GetEnergyMax();
+  unsigned eInit  = fDecoder->GetEnergyInitial();
+  unsigned flags = fDecoder->GetFlags();
+  unsigned trailer = fDecoder->GetTrailer();
+
+  bool pileupFlag = fDecoder->IsPileupFlag();
+  bool isRetriggerFlag = fDecoder->IsRetriggerFlag();
+  bool isADCNPlusOneTriggerFlag = fDecoder->IsADCNPlusOneTriggerFlag();
+  bool IsADCNMinusOneTriggerFlag = fDecoder->IsADCNMinusOneTriggerFlag();
+  bool isTriggerFlag = fDecoder->IsTriggerFlag();
+  unsigned short getFastTriggerCounter = fDecoder->GetFastTriggerCounter();
+
+
+  //WAVEFORM STUFF BELOW
+  size_t waveformLength = fDecoder->GetWaveformLen();
+
+  //This can also be done with unsigned shorts
+  double* waveformBuffer = new double[waveformLength];
+  fDecoder->CopyWaveformDataDouble(waveformBuffer, waveformLength);
+  // All right, so the waveform is now stored in doubles
+
+  std::cout<<"Waveform:"<<std::endl;
+  for(int i=0;i<waveformLength;i++){
+    fFile<<waveformBuffer[i]<<",";
+  }
+  fFile<<endl;
+
+
+  delete[] waveformBuffer;
+
+
+  size_t eWaveformLength = fDecoder->GetEnergyWaveformLen();
+  double* energyWaveformBuffer = new double[eWaveformLength];
+  fDecoder->CopyEnergyWaveformDataDouble(energyWaveformBuffer, eWaveformLength);
+
+  delete[] energyWaveformBuffer;
+  
+  return ORDataProcessor::kSuccess;
+}
+ORDataProcessor::EReturnCode CaliopeAnalysisElement::EndRun(){
+  return ORDataProcessor::kSuccess;
+}
